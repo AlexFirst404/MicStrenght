@@ -1,3 +1,38 @@
+"""
+MicStrenght - Усилитель микрофона с эффектами
+
+Описание:
+---------
+Программа для усиления сигнала микрофона с возможностью добавления эффекта искажения.
+Разработана для использования с виртуальным аудио кабелем (VB-CABLE).
+
+Основные возможности:
+--------------------
+1. Усиление микрофона от 0 до 10000
+2. Эффект искажения звука ("пердящий" эффект)
+3. Работа через виртуальный аудио кабель
+4. Тёмная тема интерфейса
+5. Выбор входного и выходного устройства
+
+Как использовать:
+---------------
+1. Установите VB-CABLE (Virtual Audio Cable)
+2. Выберите ваш микрофон как входное устройство
+3. Выберите "CABLE Input" как выходное устройство
+4. Введите значение усиления (0-10000)
+5. Нажмите "СТАРТ"
+6. В других программах выберите "CABLE Output" как микрофон
+
+Примечания:
+----------
+- Чем больше значение усиления, тем сильнее искажение
+- Звук идёт только на виртуальный кабель, чтобы избежать эффекта эхо
+- При ошибках ввода значение усиления автоматически корректируется
+
+Автор: AlexFirst
+Версия: 1.0
+"""
+
 import sys
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QComboBox, QLabel, QSlider, QPushButton,
@@ -31,9 +66,11 @@ class MicAmplifierGUI(QMainWindow):
         self.setMinimumSize(400, 300)
         
         # Иконка приложения
-        icon_path = os.path.join(os.path.dirname(__file__), "mic_icon.png")
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
+        else:
+            print(f"Иконка не найдена по пути: {icon_path}")
         
         # Инициализация аудио параметров
         self.sample_rate = 48000
@@ -72,19 +109,32 @@ class MicAmplifierGUI(QMainWindow):
         
         layout.addLayout(devices_layout)
         
-        # Слайдер усиления
+        # Поле ввода усиления
         gain_layout = QVBoxLayout()
-        self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setMinimum(0)
-        self.gain_slider.setMaximum(100000)
-        self.gain_slider.setValue(100)
-        self.gain_slider.setTracking(True)
         
-        self.gain_label = QLabel("Усиление: 1.0")
-        self.gain_label.setAlignment(Qt.AlignCenter)
+        gain_label = QLabel("Введите значение усиления, 1 - Идеально, 10  - очень громко, 100 - просто шум")
+        gain_label.setAlignment(Qt.AlignCenter)
+        gain_layout.addWidget(gain_label)
         
-        gain_layout.addWidget(self.gain_label)
-        gain_layout.addWidget(self.gain_slider)
+        self.gain_input = QLineEdit()
+        self.gain_input.setAlignment(Qt.AlignCenter)
+        self.gain_input.setText("100")
+        self.gain_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a1a;
+                color: white;
+                border: 1px solid #525252;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QLineEdit:focus {
+                border-color: #626262;
+            }
+        """)
+        gain_layout.addWidget(self.gain_input)
+        
         layout.addLayout(gain_layout)
         
         # Кнопки управления
@@ -105,7 +155,7 @@ class MicAmplifierGUI(QMainWindow):
         layout.addWidget(self.status_label)
         
         # Подключение сигналов
-        self.gain_slider.valueChanged.connect(self.update_gain)
+        self.gain_input.textChanged.connect(self.update_gain)
         self.start_button.clicked.connect(self.start_stream)
         self.stop_button.clicked.connect(self.stop_stream)
         
@@ -209,13 +259,21 @@ class MicAmplifierGUI(QMainWindow):
     
     def update_gain(self):
         try:
-            value = self.gain_slider.value()
-            with self.gain_lock:
-                self.gain = value / 100.0  # Преобразуем значение слайдера в коэффициент усиления
-                self.gain_label.setText(f"Усиление: {self.gain:.1f}")
+            text = self.gain_input.text().strip()
+            if text:
+                value = float(text)
+                # Ограничиваем значение от 0 до 10000
+                value = max(0, min(10000, value))
+                with self.gain_lock:
+                    self.gain = value
+                    
+                # Обновляем текст, только если значение изменилось
+                if str(value) != text:
+                    self.gain_input.setText(str(value))
                 
-        except Exception as e:
-            self.status_label.setText(f"Ошибка: {str(e)}")
+        except ValueError:
+            # Если введено некорректное значение, возвращаем предыдущее
+            self.gain_input.setText(str(self.gain))
     
     def audio_callback(self, indata, outdata, frames, time, status):
         if status and not 'priming output' in str(status):
@@ -226,23 +284,38 @@ class MicAmplifierGUI(QMainWindow):
                 # Копируем входные данные в промежуточный буфер
                 self.buffer[:frames] = indata
                 
-                # Применяем усиление с мягким клиппингом
-                amplified = self.buffer[:frames] * self.gain
+                # Проверяем, является ли выходное устройство виртуальным кабелем
+                output_device_name = self.output_combo.currentText().lower()
+                is_virtual_cable = any(name in output_device_name for name in ['vb-cable', 'virtual', 'vb audio', 'cable output', 'CABLE Output (VB-Audio Virtual Cable)', 'CABLE input(VB-Audio Virtual Cable)'])
                 
-                # Применяем мягкое ограничение для уменьшения искажений
-                processed = np.tanh(amplified)
-                
-                # Нормализация для предотвращения перегрузки
-                max_val = np.max(np.abs(processed))
-                if max_val > 0.95:
-                    processed *= 0.95 / max_val
-                
-                # Записываем в выходной буфер
-                outdata[:] = processed
+                if is_virtual_cable:
+                    # Применяем ОЧЕНЬ сильное усиление
+                    amplified = self.buffer[:frames] * self.gain * 50  # Увеличили множитель с 10 до 50
+                    
+                    # Добавляем сильное искажение (эффект "пердения")
+                    distorted = np.clip(amplified * 2.5, -1, 1)  # Увеличили множитель с 1.5 до 2.5
+                    distorted = np.sign(distorted) * np.power(np.abs(distorted), 0.5)  # Изменили степень с 0.7 на 0.5 для более сильного искажения
+                    
+                    # Добавляем меньше оригинального сигнала для более сильного эффекта
+                    processed = 0.9 * distorted + 0.1 * amplified  # Изменили пропорцию с 0.7/0.3 на 0.9/0.1
+                    
+                    # Дополнительное искажение
+                    processed = np.sin(processed * np.pi) # Добавили синусоидальное искажение
+                    
+                    # Нормализация для предотвращения перегрузки
+                    max_val = np.max(np.abs(processed))
+                    if max_val > 0.95:
+                        processed *= 0.95 / max_val
+                    
+                    # Записываем в выходной буфер
+                    outdata[:] = processed
+                else:
+                    # Если это не виртуальный кабель, отправляем тишину
+                    outdata.fill(0)
                 
         except Exception as e:
             self.status_label.setText(f"Ошибка в обработке звука: {e}")
-            outdata[:] = indata
+            outdata.fill(0)  # В случае ошибки отправляем тишину
     
     def start_stream(self):
         try:
@@ -266,7 +339,14 @@ class MicAmplifierGUI(QMainWindow):
             self.input_combo.setEnabled(False)
             self.output_combo.setEnabled(False)
             
-            self.status_label.setText("Микрофон активен")
+            # Проверяем тип выходного устройства для статуса
+            output_device_name = self.output_combo.currentText().lower()
+            is_virtual_cable = any(name in output_device_name for name in ['vb-cable', 'virtual', 'vb audio', 'cable output'])
+            
+            if is_virtual_cable:
+                self.status_label.setText("Микрофон активен (звук идёт только на виртуальный кабель)")
+            else:
+                self.status_label.setText("Микрофон активен (звук отключен)")
             
         except Exception as e:
             self.status_label.setText(f"Ошибка: {str(e)}")

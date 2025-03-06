@@ -16,4 +16,5 @@ PyInstaller.__main__.run([
     '--hidden-import=numpy',
     '--hidden-import=sounddevice',
     '--hidden-import=PySide6',
+    '--icon=icon.ico',
 ]) 
