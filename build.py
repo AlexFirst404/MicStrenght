@@ -8,7 +8,7 @@ script_path = os.path.abspath("mic_amplifier_gui.py")
 # Настройки для PyInstaller
 PyInstaller.__main__.run([
     script_path,
-    '--name=Усилитель микрофона',
+    '--name=MicS',
     '--onefile',
     '--noconsole',
     '--clean',
