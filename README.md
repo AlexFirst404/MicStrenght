@@ -1,3 +1,3 @@
 # MicStrenght
  
-Main .exe file into MicStrenght/Dist/
+Main .exe file into MicStrenght/Dist/ or Releases
